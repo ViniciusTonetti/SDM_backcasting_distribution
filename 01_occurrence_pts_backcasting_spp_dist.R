@@ -32,6 +32,8 @@ nome_spp <- list.files(folder_pts, pattern = "\\.xlsx$")
 
 nome_spp  <- gsub("_", " ", gsub("_final_clean.xlsx", "", nome_spp))
 
+sp <- nome_spp
+
 
 # Folders ----------------------------------------------------------------------
 
@@ -151,7 +153,7 @@ print(head(taxon_keys_valid))
 # Se você já tiver uma chave de download boa, coloque aqui.
 # Caso contrário, deixe NA para solicitar um novo download.
 
-gbif_key_manual <- NA_character_
+gbif_key_manual <- 0005848-260903145123482
 
 if (!is.na(gbif_key_manual)) {
   
@@ -180,10 +182,7 @@ if (!is.na(gbif_key_manual)) {
   cat("\nChave do novo download GBIF:\n")
   print(gbif_key)
   
-  writeLines(
-    gbif_key,
-    file.path(gbif_dir, "gbif_download_key.txt")
-  )
+  writeLines(gbif_key, file.path(gbif_dir, "gbif_download_key.txt"))
 }
 
 
