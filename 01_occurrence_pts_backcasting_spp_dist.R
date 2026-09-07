@@ -393,24 +393,6 @@ for (i in seq_along(sp)) {
   spp_file <- gsub(" ", "_", spp_name)
   
   # ---------------------------------------------------------------------------
-  # Dados da planilha ATLANTIC
-  # ---------------------------------------------------------------------------
-  
-  occ_atlantic_i <- atlantic_occ %>%
-    dplyr::filter(species == spp_name) %>%
-    dplyr::transmute(
-      name = species,
-      longitude = suppressWarnings(as.numeric(longitude)),
-      latitude  = suppressWarnings(as.numeric(latitude)),
-      year      = suppressWarnings(as.numeric(year)),
-      database  = "ATLANTIC_BATS",
-      institutionCode = NA_character_,
-      collectionCode  = NA_character_,
-      basisOfRecord   = NA_character_,
-      datasetKey      = NA_character_
-    )
-  
-  # ---------------------------------------------------------------------------
   # Dados do GBIF já filtrados por origem
   # ---------------------------------------------------------------------------
   
@@ -432,10 +414,7 @@ for (i in seq_along(sp)) {
   # RAW
   # ===========================================================================
   
-  occ_data <- dplyr::bind_rows(
-    occ_atlantic_i,
-    occ_data_gbif
-  ) %>%
+  occ_data <- occ_data_gbif %>%
     dplyr::mutate(
       name = spp_name,
       longitude = suppressWarnings(as.numeric(longitude)),
