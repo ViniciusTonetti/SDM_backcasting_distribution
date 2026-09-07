@@ -36,7 +36,7 @@ nome_spp  <- gsub("_", " ", gsub("_final_clean.xlsx", "", nome_spp))
 # Folders ----------------------------------------------------------------------
 
 
-input <- "C:/Users/vt316/OneDrive - University of Cambridge/Desktop/Vinicius/suzano/01_data/05_Occurrence points/01_Birds/"
+input <- "C:/Users/vt316/OneDrive - University of Cambridge/Desktop/Vinicius/suzano/01_data/05_Occurrence points/01_Birds/GBIF run 2026.09.d07/"
 
 shape_af <- "C:/Users/vt316/OneDrive - University of Cambridge/Desktop/Vinicius/maps/Atlantic Forest/Muylaert et al/limites_integradores_wgs84_v1_2_0/limites_integradores_wgs84_v1_2_0/ma_limite_integrador_muylaert_et_al_2018_wgs84_geodesic_v1_2_0.shp"
 
