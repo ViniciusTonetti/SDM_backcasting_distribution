@@ -186,9 +186,463 @@ if (!is.na(gbif_key_manual)) {
 }
 
 
+# ==============================================================================
+# 6) VERIFICAR SE O DOWNLOAD ESTÁ PRONTO
+# ==============================================================================
+
+# Se o script parar aqui porque o download está RUNNING,
+# NÃO rode a seção 5 novamente.
+# Na próxima tentativa, coloque a chave salva em gbif_key_manual.
+
+
+meta <- rgbif::occ_download_meta("0024379-260519110011954")
+
+cat("\nStatus do download GBIF:\n")
+print(meta$status)
+
+cat("\nNúmero de registros encontrados pelo GBIF:\n")
+print(meta$totalRecords)
+
+if (meta$status != "SUCCEEDED") {
+  stop(
+    paste0(
+      "O download do GBIF ainda não está pronto. ",
+      "Status atual: ", meta$status, ". ",
+      "Guarde esta chave e use em gbif_key_manual na próxima tentativa: ",
+      gbif_key
+    )
+  )
+}
+
+if (is.null(meta$totalRecords) || meta$totalRecords == 0) {
+  stop(
+    paste0(
+      "O download terminou, mas retornou 0 registros. ",
+      "Isso indica problema nos filtros da consulta. Chave: ",
+      gbif_key
+    )
+  )
+}
+
+
+# ==============================================================================
+# 7) BAIXAR E IMPORTAR O ARQUIVO DO GBIF
+# ==============================================================================
+
+# Remover arquivos vazios/incompletos, se houver
+
+arquivos_gbif <- list.files(gbif_dir, full.names = TRUE)
+
+if (length(arquivos_gbif) > 0) {
+  
+  info_arquivos <- file.info(arquivos_gbif)
+  
+  arquivos_vazios <- rownames(info_arquivos)[
+    !is.na(info_arquivos$size) & info_arquivos$size == 0
+  ]
+  
+  if (length(arquivos_vazios) > 0) {
+    message("Removendo arquivos vazios/incompletos do GBIF:")
+    print(arquivos_vazios)
+    file.remove(arquivos_vazios)
+  }
+}
+
+gbif_zip <- rgbif::occ_download_get(
+  key = "0024379-260519110011954",
+  path = gbif_dir,
+  overwrite = TRUE
+)
+
+cat("\nArquivo baixado:\n")
+print(gbif_zip)
+
+cat("\nTamanho do arquivo em bytes:\n")
+print(file.info(gbif_zip)$size)
+
+gbif_all <- rgbif::occ_download_import(gbif_zip)
+
+cat("\nDimensão do objeto GBIF importado:\n")
+print(dim(gbif_all))
+
+cat("\nColunas do GBIF:\n")
+print(colnames(gbif_all))
+
+View(gbif_all)
+
+unique(gbif_all$institutionCode)
+
+# Preparar GBIF usando taxonKey.
+# Não filtramos por scientificName porque o GBIF pode retornar nome com autoria,
+# sinônimos ou pequenas diferenças em relação à sua planilha.
+
+gbif_occ <- gbif_all %>%
+  dplyr::transmute(
+    taxonKey  = suppressWarnings(as.integer(taxonKey)),
+    gbif_name = stringr::str_squish(scientificName),
+    longitude = suppressWarnings(as.numeric(decimalLongitude)),
+    latitude  = suppressWarnings(as.numeric(decimalLatitude)),
+    year      = suppressWarnings(as.numeric(year)),
+    database  = "GBIF_occ_download"
+  ) %>%
+  dplyr::filter(
+    !is.na(taxonKey),
+    taxonKey %in% taxon_keys_valid$taxonKey,
+    !is.na(longitude),
+    !is.na(latitude)
+  ) %>%
+  dplyr::left_join(
+    taxon_keys_valid %>%
+      dplyr::select(name_original, taxonKey),
+    by = "taxonKey"
+  ) %>%
+  dplyr::mutate(
+    name = name_original
+  ) %>%
+  dplyr::select(name, longitude, latitude, year, database)
+
+cat("\nNúmero total de registros GBIF importados e filtrados para suas espécies:", nrow(gbif_occ), "\n")
+
+
+# ==============================================================================
+# 7.1) EXCLUIR FONTES INDESEJADAS DO GBIF
+# ==============================================================================
+#Excluding not vertfing data from Citzenship data
+fontes_excluir_gbif <- c(
+  "iNaturalist",
+  "Mined from GenBank, NCBI", "NABU|naturgucker"
+)
+
+# Diagnóstico antes da exclusão
+cat("\nRegistros GBIF antes da exclusão:", nrow(gbif_all), "\n")
+
+gbif_excluidos_origem <- gbif_all %>%
+  dplyr::mutate(
+    institutionCode = stringr::str_squish(as.character(institutionCode))
+  ) %>%
+  dplyr::filter(institutionCode %in% fontes_excluir_gbif) %>%
+  dplyr::count(institutionCode, sort = TRUE, name = "n_excluded")
+
+print(gbif_excluidos_origem)
+
+# Filtrar GBIF
+gbif_all_filtrado <- gbif_all %>%
+  dplyr::mutate(
+    institutionCode = stringr::str_squish(as.character(institutionCode))
+  ) %>%
+  dplyr::filter(
+    !institutionCode %in% fontes_excluir_gbif
+  )
+
+cat("\nRegistros GBIF depois da exclusão:", nrow(gbif_all_filtrado), "\n")
+cat("\nRegistros removidos:", nrow(gbif_all) - nrow(gbif_all_filtrado), "\n")
+
+gbif_occ <- gbif_all_filtrado %>%
+  dplyr::transmute(
+    taxonKey  = suppressWarnings(as.integer(taxonKey)),
+    gbif_name = stringr::str_squish(scientificName),
+    longitude = suppressWarnings(as.numeric(decimalLongitude)),
+    latitude  = suppressWarnings(as.numeric(decimalLatitude)),
+    year      = suppressWarnings(as.numeric(year)),
+    institutionCode = stringr::str_squish(as.character(institutionCode)),
+    collectionCode  = stringr::str_squish(as.character(collectionCode)),
+    basisOfRecord   = stringr::str_squish(as.character(basisOfRecord)),
+    datasetKey      = stringr::str_squish(as.character(datasetKey)),
+    database  = "GBIF_occ_download"
+  ) %>%
+  dplyr::filter(
+    !is.na(taxonKey),
+    taxonKey %in% taxon_keys_valid$taxonKey,
+    !is.na(longitude),
+    !is.na(latitude)
+  ) %>%
+  dplyr::left_join(
+    taxon_keys_valid %>%
+      dplyr::select(name_original, taxonKey),
+    by = "taxonKey"
+  ) %>%
+  dplyr::mutate(
+    name = name_original
+  ) %>%
+  dplyr::select(
+    name,
+    longitude,
+    latitude,
+    year,
+    database,
+    institutionCode,
+    collectionCode,
+    basisOfRecord,
+    datasetKey
+  )
 
 
 
+# ==============================================================================
+# 8) LOOP DE LIMPEZA POR ESPÉCIE
+# ==============================================================================
+
+for (i in seq_along(sp)) {
+  
+  cat("\n=============================\n")
+  cat("Espécie:", sp[i], "\n")
+  cat("Progresso:", i, "de", length(sp), "\n")
+  cat("=============================\n")
+  
+  spp_name <- sp[i]
+  spp_file <- gsub(" ", "_", spp_name)
+  
+  # ---------------------------------------------------------------------------
+  # Dados da planilha ATLANTIC
+  # ---------------------------------------------------------------------------
+  
+  occ_atlantic_i <- atlantic_occ %>%
+    dplyr::filter(species == spp_name) %>%
+    dplyr::transmute(
+      name = species,
+      longitude = suppressWarnings(as.numeric(longitude)),
+      latitude  = suppressWarnings(as.numeric(latitude)),
+      year      = suppressWarnings(as.numeric(year)),
+      database  = "ATLANTIC_BATS",
+      institutionCode = NA_character_,
+      collectionCode  = NA_character_,
+      basisOfRecord   = NA_character_,
+      datasetKey      = NA_character_
+    )
+  
+  # ---------------------------------------------------------------------------
+  # Dados do GBIF já filtrados por origem
+  # ---------------------------------------------------------------------------
+  
+  occ_data_gbif <- gbif_occ %>%
+    dplyr::filter(name == spp_name) %>%
+    dplyr::transmute(
+      name = name,
+      longitude = suppressWarnings(as.numeric(longitude)),
+      latitude  = suppressWarnings(as.numeric(latitude)),
+      year      = suppressWarnings(as.numeric(year)),
+      database  = as.character(database),
+      institutionCode = as.character(institutionCode),
+      collectionCode  = as.character(collectionCode),
+      basisOfRecord   = as.character(basisOfRecord),
+      datasetKey      = as.character(datasetKey)
+    )
+  
+  # ===========================================================================
+  # RAW
+  # ===========================================================================
+  
+  occ_data <- dplyr::bind_rows(
+    occ_atlantic_i,
+    occ_data_gbif
+  ) %>%
+    dplyr::mutate(
+      name = spp_name,
+      longitude = suppressWarnings(as.numeric(longitude)),
+      latitude  = suppressWarnings(as.numeric(latitude)),
+      year      = suppressWarnings(as.numeric(year)),
+      database  = as.character(database),
+      institutionCode = as.character(institutionCode),
+      collectionCode  = as.character(collectionCode),
+      basisOfRecord   = as.character(basisOfRecord),
+      datasetKey      = as.character(datasetKey)
+    ) %>%
+    dplyr::select(
+      name,
+      longitude,
+      latitude,
+      year,
+      database,
+      institutionCode,
+      collectionCode,
+      basisOfRecord,
+      datasetKey
+    )
+  
+  writexl::write_xlsx(
+    occ_data,
+    file.path(output, "raw", paste0(spp_file, "_raw.xlsx"))
+  )
+  
+  # ===========================================================================
+  # RAW_YEAR
+  # ===========================================================================
+  
+  occ_data_tax_date <- occ_data %>%
+    dplyr::filter(
+      !is.na(year),
+      year >= 2000,
+      year <= 2025
+    ) %>%
+    dplyr::arrange(year)
+  
+  writexl::write_xlsx(
+    occ_data_tax_date,
+    file.path(output, "raw_year", paste0(spp_file, "_raw_year.xlsx"))
+  )
+  
+  # ===========================================================================
+  # REMOVER NA DE COORDENADAS
+  # ===========================================================================
+  
+  occ_data_na <- occ_data_tax_date %>%
+    tidyr::drop_na(longitude, latitude) %>%
+    dplyr::mutate(name = spp_name)
+  
+  if (nrow(occ_data_na) == 0) {
+    
+    message("Sem registros válidos após filtro temporal/coordenadas para ", spp_name)
+    
+    writexl::write_xlsx(
+      tibble::tibble(),
+      file.path(output, "flagged", paste0(spp_file, "_flagged.xlsx"))
+    )
+    
+    writexl::write_xlsx(
+      tibble::tibble(),
+      file.path(output, "final_clean", paste0(spp_file, "_final_clean.xlsx"))
+    )
+    
+    next
+  }
+  
+  # ===========================================================================
+  # COORDINATECLEANER
+  # ===========================================================================
+  
+  flags_spatial <- tryCatch({
+    
+    CoordinateCleaner::clean_coordinates(
+      x = occ_data_na,
+      species = "name",
+      lon = "longitude",
+      lat = "latitude",
+      value = "spatialvalid",
+      tests = c(
+        "capitals",
+        "centroids",
+        "duplicates",
+        "equal",
+        "gbif",
+        "institutions",
+        "outliers",
+        "seas",
+        "validity",
+        "zeros"
+      ),
+      capitals_rad = 1000,
+      centroids_rad = 1000,
+      centroids_detail = "provinces",
+      inst_rad = 500,
+      outliers_method = "quantile",
+      outliers_mtp = 5
+    )
+    
+  }, error = function(e) {
+    
+    message("Erro no CoordinateCleaner para ", spp_name, ": ", e$message)
+    
+    occ_data_na %>%
+      dplyr::mutate(.summary = FALSE)
+  })
+  
+  if (!".summary" %in% colnames(flags_spatial)) {
+    flags_spatial <- flags_spatial %>%
+      dplyr::mutate(.summary = TRUE)
+  }
+  
+  # ===========================================================================
+  # FLAGGED
+  # ===========================================================================
+  
+  occ_flagged_i <- flags_spatial %>%
+    dplyr::filter(.summary == FALSE)
+  
+  writexl::write_xlsx(
+    occ_flagged_i,
+    file.path(output, "flagged", paste0(spp_file, "_flagged.xlsx"))
+  )
+  
+  # ===========================================================================
+  # CLEAN APÓS COORDINATECLEANER
+  # ===========================================================================
+  
+  occ_data_tax_date_spa <- flags_spatial %>%
+    dplyr::filter(.summary == TRUE) %>%
+    dplyr::select(
+      name,
+      longitude,
+      latitude,
+      year,
+      database,
+      institutionCode,
+      collectionCode,
+      basisOfRecord,
+      datasetKey
+    )
+  
+  if (nrow(occ_data_tax_date_spa) == 0) {
+    
+    message("Sem registros após CoordinateCleaner para ", spp_name)
+    
+    writexl::write_xlsx(
+      tibble::tibble(),
+      file.path(output, "final_clean", paste0(spp_file, "_final_clean.xlsx"))
+    )
+    
+    next
+  }
+  
+  # ===========================================================================
+  # FILTRO PELO POLÍGONO DA MATA ATLÂNTICA
+  # ===========================================================================
+  
+  occ_sf <- occ_data_tax_date_spa %>%
+    dplyr::mutate(
+      x = longitude,
+      y = latitude
+    ) %>%
+    sf::st_as_sf(coords = c("x", "y"), crs = 4326, remove = FALSE)
+  
+  inside_af <- sf::st_intersects(occ_sf, af, sparse = FALSE)
+  
+  occ_data_tax_date_spa_lim <- occ_sf %>%
+    dplyr::mutate(lim = inside_af[, 1]) %>%
+    dplyr::filter(lim == TRUE) %>%
+    dplyr::select(-lim) %>%
+    sf::st_drop_geometry() %>%
+    dplyr::select(
+      name,
+      longitude,
+      latitude,
+      year,
+      database,
+      institutionCode,
+      collectionCode,
+      basisOfRecord,
+      datasetKey
+    ) %>%
+    dplyr::mutate(name = spp_name)
+  
+  if (nrow(occ_data_tax_date_spa_lim) == 0) {
+    
+    message("Sem registros dentro do polígono final para ", spp_name)
+    
+    writexl::write_xlsx(
+      tibble::tibble(),
+      file.path(output, "final_clean", paste0(spp_file, "_final_clean.xlsx"))
+    )
+    
+    next
+  }
+  
+  writexl::write_xlsx(
+    occ_data_tax_date_spa_lim,
+    file.path(output, "final_clean", paste0(spp_file, "_final_clean.xlsx"))
+  )
+}
+
+cat("\nProcessamento finalizado.\n")
 
 
 
