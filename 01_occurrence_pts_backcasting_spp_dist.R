@@ -249,7 +249,7 @@ if (length(arquivos_gbif) > 0) {
 }
 
 gbif_zip <- rgbif::occ_download_get(
-  key = "0024379-260519110011954",
+  key = "0005848-260903145123482",
   path = gbif_dir,
   overwrite = TRUE
 )
@@ -450,8 +450,8 @@ for (i in seq_along(sp)) {
   occ_data_tax_date <- occ_data %>%
     dplyr::filter(
       !is.na(year),
-      year >= 2000,
-      year <= 2025
+      year >= 2025,
+      year <= 2026
     ) %>%
     dplyr::arrange(year)
   
