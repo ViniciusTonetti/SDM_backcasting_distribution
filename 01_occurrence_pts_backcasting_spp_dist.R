@@ -76,10 +76,117 @@ Sys.getenv("GBIF_EMAIL")
 
 
 af <- sf::st_read(shape_af)
-
 sf::st_crs(af) <- "EPSG:4326"
-
 sf::sf_use_s2(FALSE)
+
+
+# ==============================================================================
+# 4.1) OBTER taxonKey DO GBIF PARA TODAS AS ESPÉCIES
+# ==============================================================================
+
+taxon_keys_file <- file.path(output, "gbif_taxon_keys.xlsx")
+taxon_keys_rds  <- file.path(output, "gbif_taxon_keys.rds")
+
+if (file.exists(taxon_keys_rds)) {
+  
+  cat("\nLendo taxonKeys já salvos em:\n")
+  cat(taxon_keys_rds, "\n")
+  
+  taxon_keys <- readRDS(taxon_keys_rds)
+  
+} else {
+  
+  taxon_keys <- purrr::map_dfr(
+    sp,
+    function(spp) {
+      
+      cat("Buscando taxonKey para:", spp, "\n")
+      
+      bb <- tryCatch(
+        rgbif::name_backbone(name = spp),
+        error = function(e) NULL
+      )
+      
+      if (is.null(bb) || is.null(bb$usageKey)) {
+        return(tibble::tibble(
+          name_original = spp,
+          taxonKey = NA_integer_,
+          gbif_name = NA_character_,
+          matchType = NA_character_,
+          status = NA_character_
+        ))
+      }
+      
+      tibble::tibble(
+        name_original = spp,
+        taxonKey = suppressWarnings(as.integer(bb$usageKey)),
+        gbif_name = bb$scientificName,
+        matchType = bb$matchType,
+        status = bb$status
+      )
+    }
+  )
+  
+  saveRDS(taxon_keys, taxon_keys_rds)
+  
+  writexl::write_xlsx(
+    taxon_keys,
+    taxon_keys_file
+  )
+}
+
+taxon_keys_valid <- taxon_keys %>%
+  dplyr::filter(!is.na(taxonKey)) %>%
+  dplyr::distinct(taxonKey, .keep_all = TRUE)
+
+cat("\nEspécies com taxonKey válido:", nrow(taxon_keys_valid), "de", length(sp), "\n")
+
+print(head(taxon_keys_valid))
+
+
+# ==============================================================================
+# 5) SOLICITAR DOWNLOAD EM MASSA DO GBIF USANDO taxonKey
+# ==============================================================================
+
+# Se você já tiver uma chave de download boa, coloque aqui.
+# Caso contrário, deixe NA para solicitar um novo download.
+
+gbif_key_manual <- NA_character_
+
+if (!is.na(gbif_key_manual)) {
+  
+  gbif_key <- gbif_key_manual
+  
+} else {
+  
+  gbif_download <- rgbif::occ_download(
+    rgbif::pred_in("taxonKey", taxon_keys_valid$taxonKey),
+    rgbif::pred("hasCoordinate", TRUE),
+    rgbif::pred("hasGeospatialIssue", FALSE),
+    rgbif::pred_gte("year", 2025),
+    rgbif::pred_lte("year", 2026),            # 7 September 2026
+    rgbif::pred_gte("decimalLongitude", -59),
+    rgbif::pred_lte("decimalLongitude", -34),
+    rgbif::pred_gte("decimalLatitude", -34),
+    rgbif::pred_lte("decimalLatitude", -2),
+    format = "SIMPLE_CSV",
+    user = gbif_user,
+    pwd = gbif_pwd,
+    email = gbif_email
+  )
+  
+  gbif_key <- as.character(gbif_download)
+  
+  cat("\nChave do novo download GBIF:\n")
+  print(gbif_key)
+  
+  writeLines(
+    gbif_key,
+    file.path(gbif_dir, "gbif_download_key.txt")
+  )
+}
+
+
 
 
 
